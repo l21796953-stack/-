@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <!-- 前回作成した manifest.json をそのまま使えます -->
+    <link rel="manifest" href="manifest.json">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black">
+    <title>PKゲーム</title>
+    <style>
+        body { 
+            margin: 0; 
+            background: #1e4d2b; /* スタジアムの外側 */
+            display: flex; 
+            justify-content: center; 
+            align-items: center; 
+            height: 100vh; 
+            overflow: hidden; 
+            touch-action: none; /* スワイプ時の画面スクロールを防止 */
+        }
+        canvas { 
+            background: #2e8b57; /* 芝生の色 */
+            box-shadow: 0 0 15px rgba(0,0,0,0.5); 
+            max-width: 100%;
+            max-height: 100%;
+        }
+    </style>
+</head>
+<body>
+
+<canvas id="gameCanvas" width="320" height="480"></canvas>
+
+<script>
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+
+    // ゲームのステータス
+    let score = 0;
+    
+    // オブジェクトの設定
+    let ball = { x: 160, y: 400, r: 8, vx: 0, vy: 0, kicked: false };
+    let goal = { x: 60, y: 10, w: 200, h: 40 };
+    let goalie = { x: 135, y: 50, w: 50, h: 15, speed: 2, dir: 1 };
+
+    // スワイプ操作用の変数
+    let startX, startY;
+    let isSwiping = false;
+
+    // 画面の座標を取得する関数（スマホ・PC両対応）
+    function getPos(e) {
+        const rect = canvas.getBoundingClientRect();
+        let clientX = e.clientX;
+        let clientY = e.clientY;
+        if (e.changedTouches) {
+            clientX = e.changedTouches[0].clientX;
+            clientY = e.changedTouches[0].clientY;
+        }
+        return {
+            x: clientX - rect.left,
+            y: clientY - rect.top
+        };
+    }
+
+    // スワイプ開始
+    function startSwipe(e) {
+        if (ball.kicked) return;
+        isSwiping = true;
+        const pos = getPos(e);
+        startX = pos.x;
+        startY = pos.y;
+    }
+
+    // スワイプ終了（ここでボールを蹴る）
+    function endSwipe(e) {
+        if (!isSwiping || ball.kicked) return;
+        isSwiping = false;
+        const pos = getPos(e);
+        
+        const dx = pos.x - startX;
+        const dy = pos.y - startY;
+
+        // 上方向に一定距離スワイプされていたらキック
+        if (dy < -20) {
+            ball.vx = dx * 0.06; // 左右の角度
+            ball.vy = dy * 0.06; // キックの強さ
+            ball.kicked = true;
+        }
+    }
+
+    // イベントリスナーの登録
+    canvas.addEventListener('touchstart', startSwipe, { passive: false });
+    canvas.addEventListener('touchend', endSwipe, { passive: false });
+    canvas.addEventListener('mousedown', startSwipe);
+    canvas.addEventListener('mouseup', endSwipe);
+
+    // 画面に表示するメッセージ
+    let resultMsg = "";
+    let msgTimer = 0;
+    function showMessage(msg) {
+        resultMsg = msg;
+        msgTimer = 60; // 約1秒間表示
+    }
+
+    // ボールを元の位置に戻す
+    function resetBall(isGoal) {
+        if (isGoal) {
+            score++;
+            goalie.speed = 2 + (score * 0.3); // ゴールするたびにキーパーが速くなる
+        } else {
+            score = 0; // 外したらスコアをリセット
+            goalie.speed = 2;
+        }
+        
+        setTimeout(() => {
+            ball = { x: 160, y: 400, r: 8, vx: 0, vy: 0, kicked: false };
+        }, 1000);
+    }
+
+    // 座標の更新処理
+    function update() {
+        // キーパーの移動
+        goalie.x += goalie.speed * goalie.dir;
+        if (goalie.x <= goal.x || goalie.x + goalie.w >= goal.x + goal.w) {
+            goalie.dir *= -1; // ゴールの端で切り返し
+        }
+
+        // ボールの移動と判定
+        if (ball.kicked) {
+            ball.x += ball.vx;
+            ball.y += ball.vy;
+
+            // キーパーとの衝突判定
+            if (ball.x > goalie.x && ball.x < goalie.x + goalie.w &&
+                ball.y - ball.r < goalie.y + goalie.h && ball.y + ball.r > goalie.y) {
+                ball.vx = 0; ball.vy = 0;
+                showMessage("SAVE!");
+                resetBall(false);
+                ball.kicked = false;
+            }
+            // ゴールラインを越えた時の判定
+            else if (ball.y < goal.y + goal.h) {
+                if (ball.x > goal.x && ball.x < goal.x + goal.w) {
+                    ball.vx = 0; ball.vy = 0;
+                    showMessage("GOAL!!");
+                    resetBall(true);
+                    ball.kicked = false;
+                } else {
+                    ball.vx = 0; ball.vy = 0;
+                    showMessage("MISS...");
+                    resetBall(false);
+                    ball.kicked = false;
+                }
+            }
+            // 画面外に出た時（左右など）
+            else if (ball.x < 0 || ball.x > canvas.width || ball.y < 0) {
+                ball.vx = 0; ball.vy = 0;
+                showMessage("MISS...");
+                resetBall(false);
+                ball.kicked = false;
+            }
+        }
+    }
+
+    // 描画処理
+    function draw() {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+        // コートの白線
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)';
+        ctx.lineWidth = 2;
+        // ペナルティエリア
+        ctx.strokeRect(40, -10, 240, 110);
+        // ペナルティアーク（半円）
+        ctx.beginPath();
+        ctx.arc(160, 100, 40, 0, Math.PI, false);
+        ctx.stroke();
+        // ペナルティマーク
+        ctx.beginPath();
+        ctx.arc(160, 400, 3, 0, Math.PI * 2);
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.5)';
+        ctx.fill();
+
+        // ゴール（ネット）
+        ctx.fillStyle = '#ddd';
+        ctx.fillRect(goal.x, goal.y, goal.w, goal.h);
+
+        // キーパー
+        ctx.fillStyle = '#ff4444';
+        ctx.fillRect(goalie.x, goalie.y, goalie.w, goalie.h);
+
+        // ボール
+        ctx.fillStyle = '#ffffff';
+        ctx.beginPath();
+        ctx.arc(ball.x, ball.y, ball.r, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = '#000';
+        ctx.lineWidth = 1;
+        ctx.stroke();
+
+        // スコア表示
+        ctx.fillStyle = 'white';
+        ctx.font = 'bold 20px sans-serif';
+        ctx.fillText('SCORE: ' + score, 10, 30);
+
+        // メッセージ表示 (GOAL / SAVE / MISS)
+        if (msgTimer > 0) {
+            ctx.fillStyle = '#ffff00';
+            ctx.font = 'bold 40px sans-serif';
+            ctx.textAlign = 'center';
+            // 文字の縁取り
+            ctx.strokeStyle = '#000';
+            ctx.lineWidth = 4;
+            ctx.strokeText(resultMsg, canvas.width / 2, canvas.height / 2);
+            ctx.fillText(resultMsg, canvas.width / 2, canvas.height / 2);
+            ctx.textAlign = 'left';
+            msgTimer--;
+        }
+    }
+
+    // メインループ
+    function loop() {
+        update();
+        draw();
+        requestAnimationFrame(loop);
+    }
+    loop();
+</script>
+</body>
+</html>
